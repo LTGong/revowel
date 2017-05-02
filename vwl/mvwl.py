@@ -1,5 +1,7 @@
 
 import re
+import sys
+import pickle
 #import nltk
 from collections import Counter
 
@@ -48,12 +50,18 @@ def roundtrip(filein, fileout):
             o.write(text)
 '''
 
+def generate_models(filename = "training.txt"):
+    '''Make (and save) models as pickles TODO: timing, sizing'''
+    with open(filename, 'r') as f:
+        fulltext = f.read()
+    model = Counter(makeAnswerKey(fulltext))
+    with open('unigram.pickle', 'wb') as f:
+        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+
 def makeGuess(dvwld):
     guessLength = (len(dvwld)+1)
-    #return [Counter({'': 3})]*guessLength # ~63.5%
-    with open("testin.txt", 'r') as f: # ~42.7 - 63.5
-        fulltext = f.read()
-    return([Counter(makeAnswerKey(fulltext))]*guessLength)
+    with open('unigram.pickle', 'rb') as f:
+        return([pickle.load(f)]*guessLength)
 
 def disemvowel(s):
     return re.sub('[AEIOUaeiou]', '',s)
@@ -118,7 +126,18 @@ def main():
 
 
 if __name__ == '__main__':
+    generate_models()
     main()
+    #test_models(evaluator)
+
+    '''
+    print sys.argv
+    print len(sys.argv)
+    if (len(sys.argv)>1 and sys.argv[1] == '-train' or sys.argv[1] == '-t' ):
+        print('yup')
+    else:
+        main()
+    '''
 
 
 #wordlist is from http://www-01.sil.org/linguistics/wordlists/english/

@@ -1,11 +1,12 @@
 
-import re
+import re, random, string
 import sys
 import pickle
 #import nltk
 from collections import Counter
 
 DEBUG = False
+NO_GUESS = "#No Guess#"
 
 '''
 
@@ -50,13 +51,13 @@ def roundtrip(filein, fileout):
             o.write(text)
 '''
 
-import nltk
+#import nltk
 
 def compile_word_frequencies(corpus_text):
     res = {}
     #words = nltk.Text(nltk.word_tokenize(corpus_text
     #for word in words:
-    r"([B-DF-HJ-NP-TV-XZb-df-hj-np-tv-xz]+'?[B-DF-HJ-NP-TV-XZb-df-hj-np-tv-xz]*)"
+    #r"([B-DF-HJ-NP-TV-XZb-df-hj-np-tv-xz]+'?[B-DF-HJ-NP-TV-XZb-df-hj-np-tv-xz]*)"
     pattern = re.compile(r'([A-Za-z]+)')
     for m in re.finditer(pattern, corpus_text):
         word =  m.group(1)
@@ -81,37 +82,37 @@ def use_unigram_model(dvwld):
     with open('unigram.pickle', 'rb') as f:
         return([pickle.load(f)]*guessLength)
 
-def generate_trigram_model(fulltext = "training.txt"):
+def generate_Ngram_model(fulltext = "training.txt",n=2):
     pairs = []
     vowel_sequences = makeAnswerKey(fulltext)
     anchors = disemvowel(fulltext)
-    n_consonants_sampled = 2
+    #n = 2
     model = {}
-    for i in range(len(anchors)-n_consonants_sampled+1):
-        anch = anchors[i:i+n_consonants_sampled]
-        vowel_seq = vowel_sequences[i+n_consonants_sampled-1]
+    for i in range(len(anchors)-n+1):
+        anch = anchors[i:i+n]
+        vowel_seq = vowel_sequences[i+n-1]
         if anch in model:
             model[anch][vowel_seq] +=1
         else:
             model[anch] = Counter({vowel_seq:1})
 
-    with open('trigram.pickle', 'wb') as f:
+    with open(str(n)+'gram.pickle', 'wb') as f:
         pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
-def use_trigram_model(dvwld):
+def dists_from_Ngrams(dvwld, n = 2):
     #guessLength = (len(dvwld)+1)
-    with open('trigram.pickle', 'rb') as f:
+    with open(str(n)+'gram.pickle', 'rb') as f:
         cons_lookup = pickle.load(f)
-    n_consonants_sampled = 2
-    guess = [Counter()]# first vowel not in model, we punt (correct for fencepost)
-    for i in range(len(dvwld)-n_consonants_sampled+1):
-        cons = dvwld[i:i+n_consonants_sampled]
+    ##n = 2
+    guess = [NO_GUESS]*(n-1)# first vowel not in model, we punt (correct for fencepost)
+    for i in range(len(dvwld)-n+1):
+        cons = dvwld[i:i+n]
         #print dvwld[i] + repr(cons_lookup[cons]) + dvwld[i+1]
         if cons in cons_lookup:
             guess += [cons_lookup[cons]]
         else:
-            guess += [Counter()]
-    guess += [Counter()] #again correct for fencepost at end.
+            guess += [NO_GUESS]
+    guess += [NO_GUESS]#again correct for fencepost at end.
     return guess
 
 def generate_word_model(fulltext):
@@ -134,35 +135,37 @@ def generate_word_model(fulltext):
         pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
     '''
 
-def use_word_model(dvwld):
+def dists_from_word(dvwld):
+    segments = segment(dvwld)
+    if type(segments[0]) is int:
+        segments[0] +=1
+    if type(segments[-1]) is int:
+        segments[-1] +=1
+
+
+
+def segment(dvwld):
+    #consonant_letters = set(string.ascii_letters()) - set('AEIOUaeiou')
+    res = []
+    cons_cluster = ''
+    gap_length = 0
     for char in dvwld:
-        pass
-        #TK
-    '''
-    guessLength = (len(dvwld)+1)
-    with open('word.pickle', 'rb') as f:
-        cons_lookup = pickle.load(f)
-    n_consonants_sampled = 2
-    guess = [Counter()]# first vowel not in model, we punt (correct for fencepost)
-    for i in range(len(dvwld)-n_consonants_sampled+1):
-        cons = dvwld[i:i+n_consonants_sampled]
-        #print dvwld[i] + repr(cons_lookup[cons]) + dvwld[i+1]
-        if cons in cons_lookup:
-            guess += [cons_lookup[cons]]
+        if (char in string.ascii_letters):#consonant_letters):
+            if gap_length>0:
+                res += [gap_length]
+                gap_length = 0
+            cons_cluster +=char
         else:
-            guess += [Counter()]
-    guess += [Counter()] #again correct for fencepost at end.
-    '''
-    return guess
-
-def generate_models(filename = "training.txt"):
-    '''Make (and save) models as pickles TODO: timing, sizing'''
-    with open(filename, 'r') as f:
-        fulltext = f.read()
-    generate_trigram_model(fulltext)
-
-def makeGuess(dvwld):
-    return use_trigram_model(dvwld)
+            if len(cons_cluster)>0:
+                res += [cons_cluster]
+                cons_cluster = ''
+            gap_length  += 1
+    #There's one
+    if(gap_length):
+        res +=[gap_length]
+    else:
+        res+= [cons_cluster]
+    return res
 
 def disemvowel(s):
     return re.sub('[AEIOUaeiou]', '',s)
@@ -177,9 +180,9 @@ def makeAnswerKey(voweledString):
         else:
             key.append(vowel_pen)
             vowel_pen = ''
-    key.append('')
+    key.append('') #(end for fencepost)
     assert (len(key) == len(disemvowel(voweledString))+1)
-    return key #(end for fencepost)
+    return key
 
 #beware bugs! This breaks on
 def revowel(vowel_arr, disemvoweled_string):
@@ -198,13 +201,13 @@ def revowel(vowel_arr, disemvoweled_string):
 def get_top_vowels(dist_guess):
     res = []
     for dist in dist_guess:
-        if (len(dist.most_common(1)) == 0):
+        if (dist == NO_GUESS):
             res += ['*']
         else:
             res += [dist.most_common(1)[0][0]]
     return res
 
-#TODO refactor so 1 version grades distribution, and other compares like types (lists of vowels.)
+
 def grade(answer, guess):
     ##assert(len(answer) == len(guess))
     n_correct = 0
@@ -219,7 +222,8 @@ def grade(answer, guess):
     n_answered = len(answer) - n_known_unknowns
     return (n_correct, n_answered)
 
-def grade_dist(answer, dist_guess):
+#TODO refactor multiplies
+def partial_credit_dist(answer, dist_guess):
     assert(len(answer) == len(guess))
     n_correct = 0
     n_known_unknowns = 0
@@ -242,14 +246,30 @@ def runtests(text):
         if DEBUG:
             print revowel(makeAnswerKey(test), disemvowel(test))
         assert(revowel(makeAnswerKey(test), disemvowel(test))==test)
+    #Ascertain that NO_GUESS's value didn't show up anywhere
 
 def gradetrip(text):
     dvwld = disemvowel(text)
-    topVowels = get_top_vowels(makeGuess(dvwld))
+    topVowels = get_top_vowels(gen_dists(dvwld))
     correct, total = grade(makeAnswerKey(text),topVowels)
     abstentions = len(disemvowel(text))-1-total
     print str(correct) +'/'+ str(total) +  ' = ' +  str(float(correct)/total) + ' no guess for ' + str(abstentions)
-    print revowel(topVowels, dvwld)[:100]
+
+    #sample_len = 100;
+    guess_text = revowel(topVowels, dvwld)
+    #sample_start = random.randint(0, len(guess_text)-sample_len)
+    #print guess_text[sample_start:sample_start+sample_len]
+    print guess_text[:100]
+
+def generate_models(filename = "training.txt"):
+    '''Make (and save) models as pickles TODO: timing, sizing'''
+    with open(filename, 'r') as f:
+        fulltext = f.read()
+    generate_Ngram_model(fulltext, 1)
+
+#This is where you would reconicile different distribution sequences.
+def gen_dists(dvwld):
+    return dists_from_Ngrams(dvwld, 1)
 
 def main():
     with open ('testin.txt', 'r') as f:
@@ -258,24 +278,11 @@ def main():
         gradetrip(fulltext)
 
 
-
-#generate_trigram_model("Hello World!")
-#use_trigram_model(disemvowel("Hello World!"))
-
 if __name__ == '__main__':
     generate_models()
     main()
     #dg()
     #test_models(evaluator)
-
-    '''
-    print sys.argv
-    print len(sys.argv)
-    if (len(sys.argv)>1 and sys.argv[1] == '-train' or sys.argv[1] == '-t' ):
-        print('yup')
-    else:
-        main()
-    '''
 
 
 #wordlist is from http://www-01.sil.org/linguistics/wordlists/english/

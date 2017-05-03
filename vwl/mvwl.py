@@ -8,49 +8,6 @@ from collections import Counter
 DEBUG = False
 NO_GUESS = "#No Guess#"
 
-'''
-
-def makeDetectorDict(filename):
-    with open(filename, 'r') as f:
-        #below strips newlines from the ends of our strings, per http://stackoverflow.com/a/15233739
-        words = [line.rstrip('\n') for line in f]
-    #TK - this comes up often enough to be an idiom - does it have a "normal form"
-    d={}
-    for word in words:
-        key = disemvowel(word)
-        if key in d:
-            d[key].append(word)
-        else:
-            d[key] = [word]
-    return d
-
-
-def revowel(s):
-    res =[]
-    d = makeDetectorDict('wordlist.txt')
-    success = 0
-    failure = 0
-    for w in [w.lower() for w in re.findall(r'[a-zA-Z\*]+', s)]:
-        print(w)
-        print(d[w])
-        if w in d and len(d[w])==1:
-            res += d[w]
-            success +=1
-        else:
-            res += [w]
-            failure +=1
-    print float(success)/(success+failure)
-    return ' '.join(res)
-    #currently only works for star replacement
-
-
-def roundtrip(filein, fileout):
-    with open (filein, 'r') as f:
-        text = revowel(disemvowel(f.read()))
-        with open(fileout, 'w') as o:
-            o.write(text)
-'''
-
 #import nltk
 
 def compile_word_frequencies(corpus_text):
@@ -63,7 +20,7 @@ def compile_word_frequencies(corpus_text):
         word =  m.group(1)
         key = disemvowel(word)
         if key in res:
-            res[key]+=1
+            res[key][word]+=1
         else:
             res[key] = Counter({word:1})
     with open('word_freq.pickle', 'wb') as f:
@@ -73,7 +30,7 @@ def compile_word_frequencies(corpus_text):
 
 def generate_unigram_model(fulltext = "training.txt"):
     model = Counter(makeAnswerKey(fulltext))
-    print(repr(model))
+    #print(repr(model))
     with open('unigram.pickle', 'wb') as f:
         pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
@@ -117,31 +74,31 @@ def dists_from_Ngrams(dvwld, n = 2):
 
 def generate_word_model(fulltext):
     compile_word_frequencies(fulltext)
-    '''
-    pairs = []
-    vowel_sequences = makeAnswerKey(fulltext)
-    anchors = disemvowel(fulltext)
-    n_consonants_sampled = 2
-    model = {}
-    for i in range(len(anchors)-n_consonants_sampled+1):
-        anch = anchors[i:i+n_consonants_sampled]
-        vowel_seq = vowel_sequences[i+n_consonants_sampled-1]
-        if anch in model:
-            model[anch][vowel_seq] +=1
-        else:
-            model[anch] = Counter({vowel_seq:1})
 
-    with open('word.pickle', 'wb') as f:
-        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
-    '''
 
-def dists_from_word(dvwld):
+def dists_from_word_model(dvwld):
     segments = segment(dvwld)
     if type(segments[0]) is int:
         segments[0] +=1
     if type(segments[-1]) is int:
         segments[-1] +=1
+    with open('word_freq.pickle', 'r') as f:
+        wordDist = pickle.load(f)
+        likeliest_words = {k:v.most_common(1)[0][0] for k, v in wordDist.iteritems()}
 
+    res = []
+    for sequence in segments:
+        if type(sequence) is int:
+            res += [NO_GUESS]*(sequence-1)
+        else:
+            if sequence in likeliest_words:
+                vowels = makeAnswerKey(likeliest_words[sequence])
+                if type(vowels) is str:
+                    print vowels
+                res += [Counter({s:1}) for s in makeAnswerKey(likeliest_words[sequence])]
+            else:
+                res+=[NO_GUESS]*(len(sequence)+1)
+    return res
 
 
 def segment(dvwld):
@@ -180,7 +137,10 @@ def makeAnswerKey(voweledString):
         else:
             key.append(vowel_pen)
             vowel_pen = ''
-    key.append('') #(end for fencepost)
+    if len(vowel_pen):
+        key.append(vowel_pen)
+    else:
+        key.append('') #(end for fencepost)
     assert (len(key) == len(disemvowel(voweledString))+1)
     return key
 
@@ -204,6 +164,8 @@ def get_top_vowels(dist_guess):
         if (dist == NO_GUESS):
             res += ['*']
         else:
+            if type(dist) is str:
+                print dist
             res += [dist.most_common(1)[0][0]]
     return res
 
@@ -252,40 +214,91 @@ def gradetrip(text):
     dvwld = disemvowel(text)
     topVowels = get_top_vowels(gen_dists(dvwld))
     correct, total = grade(makeAnswerKey(text),topVowels)
-    abstentions = len(disemvowel(text))-1-total
-    print str(correct) +'/'+ str(total) +  ' = ' +  str(float(correct)/total) + ' no guess for ' + str(abstentions)
+    abstentions = len(disemvowel(text))-total
+    print "Right: "+ str(correct) +"  Wrong: "+ str(total-correct) +  " Correct of taken " + str(float(correct)/total)[:4]+ " Correct of all " + str(float(correct)/(total+abstentions))[:4] + ' (' + str(abstentions) + " omitted)"
 
-    #sample_len = 100;
     guess_text = revowel(topVowels, dvwld)
-    #sample_start = random.randint(0, len(guess_text)-sample_len)
-    #print guess_text[sample_start:sample_start+sample_len]
-    print guess_text[:100]
 
 def generate_models(filename = "training.txt"):
     '''Make (and save) models as pickles TODO: timing, sizing'''
     with open(filename, 'r') as f:
         fulltext = f.read()
-    generate_Ngram_model(fulltext, 1)
+    for i in range(1, 6):
+        generate_Ngram_model(fulltext, i)
+    generate_word_model(fulltext)
 
-#This is where you would reconicile different distribution sequences.
-def gen_dists(dvwld):
-    return dists_from_Ngrams(dvwld, 1)
+def entropy(dist_counter):
+    pass
 
-def main():
+def max_entropy(dist_counter):
+    print '.',
+
+def normalize_dist(dist):
+    res = {}
+    size = sum(dist.itervalues())
+    for i, c, in dist.most_common():
+        res[i] = float(c)/size
+
+def backoff(candidate_dists):
+    res = []
+    for dist in candidate_dists:
+        if dist != NO_GUESS:
+            return dist
+    #where to find the ones that no method gets?
+    return NO_GUESS
+
+def weighted_avg(candidate_dists):
+    pass
+
+def degenerate_best(candidate_dists):
+    return candidate_dists[0]
+
+#TK - broken
+def mushed(candidate_dists):
+    realdists = [elm for elm in candidate_dists if isinstance(candidate_dists,type(Counter()))]
+    if len(realdists):
+        print '.',
+        return sum(realdists,Counter())
+    return NO_GUESS
+
+def reconcile(candidate_dists):
+    #weighted_avg(candidate_dists)
+    #return most preferable of candidate distributions.
+    return backoff(candidate_dists)
+    #return weighted_avg(candidate_dists)
+    #return mushed(candidate_dists)
+    #return max_entropy(candidate_dists)
+
+
+def nums():
     with open ('testin.txt', 'r') as f:
         fulltext = f.read()
         runtests(fulltext)
         gradetrip(fulltext)
+def sample():
+    with open('demo.txt', 'r') as f:
+        text = f.read()
+        dvwld = disemvowel(text)
+        print revowel(get_top_vowels(gen_dists(dvwld)), dvwld)
 
+def gen_dists(dvwld):
+    ordered_dist_sequences = [dists_from_word_model(dvwld)] + [dists_from_Ngrams(dvwld, i) for i in reversed(range(1,6))]
+    res = [reconcile(vowel_candidates) for vowel_candidates in zip(*ordered_dist_sequences)]
+    #res = dists_from_word_model(dvwld)
+    return res
+
+def reconcile(candidate_dists):
+    #weighted_avg(candidate_dists)
+    #return most preferable of candidate distributions.
+    return backoff(candidate_dists)
+    #return weighted_avg(candidate_dists)
+    #return mushed(candidate_dists)
+    #return max_entropy(candidate_dists)
+
+def evaluate():
+    nums()
+    sample()
 
 if __name__ == '__main__':
-    generate_models()
-    main()
-    #dg()
-    #test_models(evaluator)
-
-
-#wordlist is from http://www-01.sil.org/linguistics/wordlists/english/
-
-#Results with vowel to star ('*'): Counter({'1': 88470, '2': 6998, '3': 1514, '4': 411, '5': 123, '6': 34, '7': 9, '8': 5, '9': 1})
-#results with vowel to null ('') : Counter({'1': 63700, '2': 8938, '3': 2606, '4': 1134, '5': 631, '6': 372, '7': 220, '8': 139, '9': 130, '10': 88, '11': 58, '12': 54, '13': 44, '15': 37, '14': 33, '16': 21, '21': 16, '17': 16, '19': 15, '18': 15, '20': 14, '22': 7, '25': 6, '23': 5, '27': 4, '26': 3, '24': 2, '28': 2, '29': 2, '44': 1, '38': 1, '31': 1, '30': 1})
+    #generate_models()
+    evaluate()

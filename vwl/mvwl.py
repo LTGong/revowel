@@ -50,18 +50,102 @@ def roundtrip(filein, fileout):
             o.write(text)
 '''
 
+def compile_word_frequencies(corpus_text):
+    res = {}
+    for word in corpus_text.split():
+        key = disemvowel(word)
+        if key in res:
+            res[key]+=1
+        else:
+            res[key] = Counter()
+def dg():
+    compile_word_frequencies("Hello, World!")
+
+def generate_unigram_model(fulltext = "training.txt"):
+    model = Counter(makeAnswerKey(fulltext))
+    print(repr(model))
+    with open('unigram.pickle', 'wb') as f:
+        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+
+def use_unigram_model(dvwld):
+    guessLength = (len(dvwld)+1)
+    with open('unigram.pickle', 'rb') as f:
+        return([pickle.load(f)]*guessLength)
+
+def generate_trigram_model(fulltext = "training.txt"):
+    pairs = []
+    vowel_sequences = makeAnswerKey(fulltext)
+    anchors = disemvowel(fulltext)
+    n_consonants_sampled = 2
+    model = {}
+    for i in range(len(anchors)-n_consonants_sampled+1):
+        anch = anchors[i:i+n_consonants_sampled]
+        vowel_seq = vowel_sequences[i+n_consonants_sampled-1]
+        if anch in model:
+            model[anch][vowel_seq] +=1
+        else:
+            model[anch] = Counter({vowel_seq:1})
+
+    with open('trigram.pickle', 'wb') as f:
+        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+
+def use_trigram_model(dvwld):
+    #guessLength = (len(dvwld)+1)
+    with open('trigram.pickle', 'rb') as f:
+        cons_lookup = pickle.load(f)
+    n_consonants_sampled = 2
+    guess = [Counter()]# first vowel not in model, we punt (correct for fencepost)
+    for i in range(len(dvwld)-n_consonants_sampled+1):
+        cons = dvwld[i:i+n_consonants_sampled]
+        #print dvwld[i] + repr(cons_lookup[cons]) + dvwld[i+1]
+        if cons in cons_lookup:
+            guess += [cons_lookup[cons]]
+        else:
+            guess += [Counter()]
+    guess += [Counter()] #again correct for fencepost at end.
+    return guess
+
+def generate_word_model(fulltext):
+    pairs = []
+    vowel_sequences = makeAnswerKey(fulltext)
+    anchors = disemvowel(fulltext)
+    n_consonants_sampled = 2
+    model = {}
+    for i in range(len(anchors)-n_consonants_sampled+1):
+        anch = anchors[i:i+n_consonants_sampled]
+        vowel_seq = vowel_sequences[i+n_consonants_sampled-1]
+        if anch in model:
+            model[anch][vowel_seq] +=1
+        else:
+            model[anch] = Counter({vowel_seq:1})
+
+    with open('word.pickle', 'wb') as f:
+        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+
+def use_word_model(dvwld):
+    #guessLength = (len(dvwld)+1)
+    with open('word.pickle', 'rb') as f:
+        cons_lookup = pickle.load(f)
+    n_consonants_sampled = 2
+    guess = [Counter()]# first vowel not in model, we punt (correct for fencepost)
+    for i in range(len(dvwld)-n_consonants_sampled+1):
+        cons = dvwld[i:i+n_consonants_sampled]
+        #print dvwld[i] + repr(cons_lookup[cons]) + dvwld[i+1]
+        if cons in cons_lookup:
+            guess += [cons_lookup[cons]]
+        else:
+            guess += [Counter()]
+    guess += [Counter()] #again correct for fencepost at end.
+    return guess
+
 def generate_models(filename = "training.txt"):
     '''Make (and save) models as pickles TODO: timing, sizing'''
     with open(filename, 'r') as f:
         fulltext = f.read()
-    model = Counter(makeAnswerKey(fulltext))
-    with open('unigram.pickle', 'wb') as f:
-        pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
+    generate_trigram_model(fulltext)
 
 def makeGuess(dvwld):
-    guessLength = (len(dvwld)+1)
-    with open('unigram.pickle', 'rb') as f:
-        return([pickle.load(f)]*guessLength)
+    return use_trigram_model(dvwld)
 
 def disemvowel(s):
     return re.sub('[AEIOUaeiou]', '',s)
@@ -93,18 +177,28 @@ def revowel(vowel_arr, disemvoweled_string):
         res = res[:preceding_consonents]+vowel_arr[preceding_consonents]+res[preceding_consonents:]
     return res
 
+
+def get_top_vowels(dist_guess):
+    pass
+
+#TODO refactor so 1 version grades distribution, and other compares like types (lists of vowels.)
+
 def grade(answer, guess):
     assert(len(answer) == len(guess))
-    score = 0
+    n_correct = 0
+    n_known_unknowns = 0
     for i, vowelSequence in enumerate(answer):
         letterCounter = guess[i]
-        if (letterCounter.most_common(1))[0][0]== vowelSequence:
-            score +=1
+        if (len(letterCounter.most_common(1)) == 0):
+            n_known_unknowns +=1
+        elif (letterCounter.most_common(1)[0][0]== vowelSequence):
+            n_correct +=1
         #if vowelSequence in letterCounter:
         #    score += float(letterCounter[vowelSequence])/sum(letterCounter.values())
         else:
-            score += 0
-    return (score, len(answer))
+            n_correct += 0 #effectively "pass"
+    n_answered = len(answer) - n_known_unknowns
+    return (n_correct, n_answered)
 
 def runtests(text):
     teststings = ['toot','The quick Brown Fox jumps over the Lazy Dog. Verily! Forsooth.']
@@ -115,7 +209,8 @@ def runtests(text):
 
 def gradetrip(text):
     correct, total = grade(makeAnswerKey(text), makeGuess(disemvowel(text)))
-    print str(correct) +'/'+ str(total) +  ' = ' +  str(float(correct)/total)
+    abstentions = len(disemvowel(text))-1-total
+    print str(correct) +'/'+ str(total) +  ' = ' +  str(float(correct)/total) + ' no guess for ' + str(abstentions)
 
 def main():
     with open ('testin.txt', 'r') as f:
@@ -125,9 +220,13 @@ def main():
 
 
 
+#generate_trigram_model("Hello World!")
+#use_trigram_model(disemvowel("Hello World!"))
+
 if __name__ == '__main__':
-    generate_models()
+    #generate_models()
     main()
+    dg()
     #test_models(evaluator)
 
     '''
